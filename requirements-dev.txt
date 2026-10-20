@@ -1,0 +1,3 @@
+# Same Pillow as InkyPi pins (install/requirements.txt).
+pillow==12.3.0
+pytest>=8
