@@ -1,0 +1,6 @@
+{
+    "display_name": "Daily Quote",
+    "id": "daily_quote",
+    "class": "DailyQuote",
+    "repository": "https://github.com/User10796/inkypi-daily-quote"
+}

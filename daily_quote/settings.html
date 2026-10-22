@@ -1,0 +1,203 @@
+<style>
+    .dq-textarea {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        min-height: 200px;
+        padding: 0.5rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-family: inherit;
+        font-size: 1rem;
+    }
+    .dq-textarea.dq-short { min-height: 90px; }
+    .dq-textarea:focus {
+        outline: none;
+        border-color: #1abc9c;
+        box-shadow: 0 0 3px rgba(26, 188, 156, 0.5);
+    }
+    .dq-hint { font-size: 0.85rem; opacity: 0.75; margin-top: 0.25rem; }
+    .dq-warning { font-size: 0.85rem; color: #b45309; margin-top: 0.25rem; }
+    .dq-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .dq-button {
+        padding: 0.5rem 0.9rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+    }
+</style>
+
+<div class="form-group">
+    <div class="form-group">
+        <label for="dqQuotes" class="form-label">Quotes (one per line)</label>
+        <textarea id="dqQuotes" name="quotes" class="dq-textarea"
+            placeholder="Be kind, for everyone you meet is fighting a hard battle. — Ian Maclaren"></textarea>
+        <div class="dq-hint">Format: <code>Quote text — Author</code> (a spaced <code>-</code> or <code>--</code> works too; author is optional). Lines starting with <code>#</code> are ignored.</div>
+        <div id="dqCount" class="dq-hint"></div>
+        <div id="dqLong" class="dq-warning"></div>
+    </div>
+
+    <div class="form-group nowrap">
+        <label for="dqOrder" class="form-label">Order:</label>
+        <select id="dqOrder" name="order" class="form-input">
+            <option value="shuffle">Shuffle (no repeats until all shown)</option>
+            <option value="sequential">In list order</option>
+            <option value="random">Random</option>
+        </select>
+    </div>
+
+    <div class="form-group nowrap">
+        <label for="dqChangeTime" class="form-label">New quote each day at:</label>
+        <input type="time" id="dqChangeTime" name="change_time" value="05:00" class="form-input">
+    </div>
+
+    <div class="form-group nowrap">
+        <label for="dqFontStyle" class="form-label">Font:</label>
+        <select id="dqFontStyle" name="font_style" class="form-input">
+            <option value="serif">Serif (Lora)</option>
+            <option value="sans">Sans, extra legible (Atkinson Hyperlegible)</option>
+            <option value="handwritten">Handwritten (Patrick Hand)</option>
+        </select>
+    </div>
+
+    <div class="form-group nowrap">
+        <label for="dqFrame" class="form-label">Border:</label>
+        <select id="dqFrame" name="frame" class="form-input">
+            <option value="none">None</option>
+            <option value="thin">Thin line</option>
+            <option value="double">Double line</option>
+        </select>
+    </div>
+
+    <div class="form-group nowrap">
+        <label for="dqShowAuthor" class="form-label">Show author:</label>
+        <div class="toggle-container">
+            <input type="checkbox" id="dqShowAuthor" name="show_author" value="true" class="toggle-checkbox" checked>
+            <label for="dqShowAuthor" class="toggle-label"></label>
+        </div>
+    </div>
+
+    <div class="form-group nowrap">
+        <label for="dqShowDate" class="form-label">Show date:</label>
+        <div class="toggle-container">
+            <input type="checkbox" id="dqShowDate" name="show_date" value="true" class="toggle-checkbox">
+            <label for="dqShowDate" class="toggle-label"></label>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="dqOverrides" class="form-label">Special dates (optional)</label>
+        <textarea id="dqOverrides" name="date_overrides" class="dq-textarea dq-short"
+            placeholder="03-14 Happy birthday, Emmy!&#10;2026-12-25 Merry Christmas!"></textarea>
+        <div class="dq-hint"><code>MM-DD message</code> repeats every year; <code>YYYY-MM-DD message</code> is one time only. Shown instead of the quote all that day.</div>
+    </div>
+
+    <div class="form-group">
+        <label for="dqJumpTo" class="form-label">Change the quote now (optional)</label>
+        <div class="dq-row">
+            <input type="number" id="dqJumpTo" name="jump_to" min="1" placeholder="Quote #" class="form-input" style="max-width: 8rem;">
+            <button type="button" id="dqSkip" class="dq-button">Show next quote</button>
+        </div>
+        <div id="dqJumpPreview" class="dq-hint"></div>
+        <div class="dq-hint">Enter a quote number, then press Update Now or Save. The chosen quote stays up for the rest of today.</div>
+    </div>
+
+    <input type="hidden" id="dqStateKey" name="state_key">
+    <input type="hidden" id="dqSkipNext" name="skip_next">
+    <input type="hidden" id="dqCommandNonce" name="command_nonce">
+</div>
+
+<script>
+    (function () {
+        const quotesEl = document.getElementById('dqQuotes');
+        const jumpEl = document.getElementById('dqJumpTo');
+        const skipNextEl = document.getElementById('dqSkipNext');
+        const nonceEl = document.getElementById('dqCommandNonce');
+        const stateKeyEl = document.getElementById('dqStateKey');
+
+        // Mirrors quote_core.parse_quotes closely enough for counts and numbering.
+        function parseQuotes(raw) {
+            const seen = new Set();
+            const quotes = [];
+            for (let line of (raw || '').split('\n')) {
+                line = line.trim();
+                if (!line || line.startsWith('#') || seen.has(line)) continue;
+                seen.add(line);
+                quotes.push(line);
+            }
+            return quotes;
+        }
+
+        function refreshHints() {
+            const quotes = parseQuotes(quotesEl.value);
+            const n = quotes.length;
+            let span = '';
+            if (n >= 14) span = ` · about ${Math.round(n / 7)} weeks of rotation`;
+            else if (n > 0) span = ` · ${n} day${n === 1 ? '' : 's'} of rotation`;
+            document.getElementById('dqCount').textContent = `${n} quote${n === 1 ? '' : 's'}${span}`;
+
+            const long = quotes
+                .map((q, i) => [i + 1, q.length])
+                .filter(([, len]) => len > 300)
+                .map(([num]) => '#' + num);
+            document.getElementById('dqLong').textContent = long.length
+                ? `Long quote${long.length > 1 ? 's' : ''} ${long.join(', ')}: over 300 characters, so the text will be small.`
+                : '';
+
+            const num = parseInt(jumpEl.value, 10);
+            const preview = document.getElementById('dqJumpPreview');
+            if (!jumpEl.value) preview.textContent = '';
+            else if (num >= 1 && num <= n) preview.textContent = `#${num}: ${quotes[num - 1].slice(0, 80)}${quotes[num - 1].length > 80 ? '…' : ''}`;
+            else preview.textContent = `There is no quote #${jumpEl.value}.`;
+        }
+
+        // A new nonce marks a fresh one-time command. InkyPi re-sends saved
+        // form values on every refresh; the plugin applies each nonce once.
+        function newNonce() { return String(Date.now()); }
+
+        jumpEl.addEventListener('input', () => {
+            skipNextEl.value = '';
+            nonceEl.value = jumpEl.value ? newNonce() : '';
+            refreshHints();
+        });
+
+        document.getElementById('dqSkip').addEventListener('click', () => {
+            jumpEl.value = '';
+            skipNextEl.value = 'true';
+            nonceEl.value = newNonce();
+            refreshHints();
+            if (typeof handleAction === 'function') {
+                handleAction('update_now');
+            } else {
+                alert('Press Update Now to show the next quote.');
+            }
+        });
+
+        quotesEl.addEventListener('input', refreshHints);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (loadPluginSettings) {
+                quotesEl.value = pluginSettings.quotes || '';
+                document.getElementById('dqOrder').value = pluginSettings.order || 'shuffle';
+                document.getElementById('dqChangeTime').value = pluginSettings.change_time || '05:00';
+                document.getElementById('dqFontStyle').value = pluginSettings.font_style || 'serif';
+                document.getElementById('dqFrame').value = pluginSettings.frame || 'none';
+                document.getElementById('dqShowAuthor').checked = pluginSettings.show_author === 'true';
+                document.getElementById('dqShowDate').checked = pluginSettings.show_date === 'true';
+                document.getElementById('dqOverrides').value = pluginSettings.date_overrides || '';
+                stateKeyEl.value = pluginSettings.state_key || '';
+                // jump_to / skip_next / command_nonce are one-shot: never prefilled.
+            }
+            if (!stateKeyEl.value) {
+                const rand = (window.crypto && crypto.randomUUID)
+                    ? crypto.randomUUID().replace(/-/g, '')
+                    : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+                stateKeyEl.value = rand.slice(0, 32);
+            }
+            refreshHints();
+        });
+    })();
+</script>
